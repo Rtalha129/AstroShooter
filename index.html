@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Astro Space</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #020617;
+            font-family: 'Rajdhani', sans-serif;
+            color: #e2e8f0;
+        }
+
+        #game-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .ui-overlay {
+            position: relative;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .glass {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
+        }
+
+        #ai-directive {
+            animation: pulse-border 2s infinite;
+        }
+
+        @keyframes pulse-border {
+            0% { border-color: rgba(56, 189, 248, 0.3); }
+            50% { border-color: rgba(56, 189, 248, 0.8); }
+            100% { border-color: rgba(56, 189, 248, 0.3); }
+        }
+
+        #crosshair {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 50%;
+            pointer-events: none;
+            transition: transform 0.1s ease-out;
+        }
+        
+        #crosshair::after, #crosshair::before {
+            content: '';
+            position: absolute;
+            background: rgba(56, 189, 248, 0.8);
+        }
+        #crosshair::after { top: 50%; left: -10px; width: 15px; height: 1px; }
+        #crosshair::before { top: -10px; left: 50%; width: 1px; height: 15px; }
+
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .time-btn.active {
+            background: rgba(56, 189, 248, 0.3);
+            border-color: #38bdf8;
+            color: white;
+        }
+
+        @keyframes infinite-loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .animate-infinite-loading {
+            animation: infinite-loading 1.5s infinite linear;
+        }
+    </style>
+</head>
+<body>
+    <div class="scanline"></div>
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Main Menu -->
+    <div id="main-menu" class="ui-overlay flex flex-col items-center justify-center min-h-screen p-6 pointer-events-auto">
+        <div class="glass p-12 rounded-2xl text-center max-w-2xl">
+            <h1 class="font-orbitron text-5xl md:text-7xl font-bold mb-4 tracking-tighter text-sky-400">ASTRO SPACE</h1>
+            <p class="text-xl text-sky-200 mb-8 opacity-80 uppercase tracking-widest font-medium text-center">Adaptive AI Gameplay Director</p>
+            
+            <div class="mb-8">
+                <p class="text-sky-400 text-xs font-orbitron mb-4 uppercase tracking-widest">Select Mission Duration</p>
+                <div class="flex justify-center gap-4">
+                    <button onclick="selectDuration(30)" id="time-30" class="time-btn glass px-6 py-2 rounded font-orbitron text-sm transition-all hover:bg-sky-500/10 active">30s</button>
+                    <button onclick="selectDuration(50)" id="time-50" class="time-btn glass px-6 py-2 rounded font-orbitron text-sm transition-all hover:bg-sky-500/10">50s</button>
+                    <button onclick="selectDuration(90)" id="time-90" class="time-btn glass px-6 py-2 rounded font-orbitron text-sm transition-all hover:bg-sky-500/10">1m 30s</button>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <button onclick="startGame()" class="w-full bg-sky-500 hover:bg-sky-400 text-white font-orbitron py-4 px-8 rounded-lg transition-all transform hover:scale-105 shadow-lg shadow-sky-500/20">
+                    SYNC ASTRO LINK
+                </button>
+            </div>
+
+            <div class="mt-12 text-sky-300/60 text-sm italic">
+                Neural audio synthesis enabled. ARIA will monitor performance until extraction.
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" class="ui-overlay fixed top-0 left-0 w-full h-full hidden pointer-events-none">
+        <div id="crosshair"></div>
+        
+        <!-- Stats Top Left -->
+        <div class="absolute top-8 left-8 space-y-4">
+            <div class="glass px-6 py-3 rounded-lg">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-sky-400 text-xs font-orbitron">SYSTEM INTEGRITY</span>
+                    <span id="health-text" class="text-white text-xs font-bold">100%</span>
+                </div>
+                <div class="w-64 h-1.5 bg-slate-800 rounded-full">
+                    <div id="health-bar" class="h-full bg-sky-400 rounded-full transition-all duration-500" style="width: 100%"></div>
+                </div>
+            </div>
+            
+            <div class="flex gap-4">
+                <div class="glass px-4 py-2 rounded">
+                    <span class="text-sky-400 text-xs font-orbitron block uppercase">Kills</span>
+                    <span id="kill-count" class="text-2xl text-white font-bold">0</span>
+                </div>
+                <div class="glass px-4 py-2 rounded">
+                    <span class="text-sky-400 text-xs font-orbitron block uppercase">Accuracy</span>
+                    <span id="accuracy-val" class="text-2xl text-sky-200 font-bold">100%</span>
+                </div>
+                <div class="glass px-4 py-2 rounded">
+                    <span class="text-sky-400 text-xs font-orbitron block uppercase">Time Left</span>
+                    <span id="timer-val" class="text-2xl text-white font-bold">00:00</span>
+                </div>
+            </div>
+
+            <!-- Active Power-ups list -->
+            <div id="active-effects" class="space-y-2"></div>
+        </div>
+
+        <!-- Intensity Indicator -->
+        <div class="absolute top-8 right-1/2 translate-x-1/2 glass px-6 py-2 rounded-full">
+            <span class="text-sky-400 text-[10px] font-orbitron uppercase tracking-widest mr-2">Astro Intensity:</span>
+            <span id="intensity-val" class="text-rose-400 font-bold font-orbitron">0.5x</span>
+        </div>
+
+        <!-- AI Director Feed Bottom Right -->
+        <div class="absolute bottom-8 right-8 w-96">
+            <div id="ai-directive" class="glass p-6 rounded-xl border-t-2">
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="w-3 h-3 bg-sky-500 rounded-full animate-ping"></div>
+                    <span class="text-sky-400 text-xs font-orbitron tracking-widest uppercase">ARIA: Astro Director</span>
+                </div>
+                <p id="ai-status-text" class="text-sky-100 text-lg font-medium leading-tight">
+                    Calibrating to pilot's synaptic response...
+                </p>
+                <div id="ai-loading" class="mt-4 h-1 w-full bg-slate-800 rounded-full overflow-hidden hidden">
+                    <div class="h-full bg-sky-400 animate-infinite-loading"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Home Button Top Right -->
+        <div class="absolute top-8 right-8 pointer-events-auto">
+            <button onclick="goToHome()" class="glass px-4 py-2 rounded text-sky-400 text-xs font-orbitron hover:bg-sky-500/10 transition-all">
+                ABORT MISSION
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over -->
+    <div id="game-over" class="ui-overlay fixed top-0 left-0 w-full h-full hidden flex items-center justify-center bg-black/95 pointer-events-auto">
+        <div class="text-center glass p-12 rounded-3xl border-rose-500/30 max-w-lg w-full">
+            <h2 id="game-over-title" class="text-5xl font-orbitron text-rose-500 mb-6 uppercase tracking-tighter">Link Disconnected</h2>
+            
+            <div class="grid grid-cols-2 gap-4 mb-10">
+                <div class="bg-white/5 p-6 rounded-xl border border-white/10">
+                    <p class="text-sky-400 text-[10px] font-orbitron uppercase tracking-widest mb-1">Total Eliminations</p>
+                    <p id="final-score" class="text-4xl text-white font-bold">0</p>
+                </div>
+                <div class="bg-white/5 p-6 rounded-xl border border-white/10">
+                    <p class="text-sky-400 text-[10px] font-orbitron uppercase tracking-widest mb-1">Combat Precision</p>
+                    <p id="final-accuracy" class="text-4xl text-sky-200 font-bold">0%</p>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <button onclick="startGame()" class="w-full bg-sky-500 text-white font-orbitron py-4 px-8 rounded-lg hover:bg-sky-400 transition-all shadow-xl shadow-sky-500/20 uppercase tracking-widest">
+                    Play Again
+                </button>
+                <button onclick="goToHome()" class="w-full border border-white/20 text-white font-orbitron py-3 px-8 rounded-lg hover:bg-white/10 transition-all uppercase tracking-widest text-sm">
+                    Return to Home
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- AUDIO ENGINE ---
+        class AudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.masterGain = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.masterGain = this.ctx.createGain();
+                this.masterGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                this.masterGain.connect(this.ctx.destination);
+                this.initialized = true;
+            }
+
+            playLaser() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+
+            playExplosion() {
+                if (!this.initialized) return;
+                const bufferSize = this.ctx.sampleRate * 0.4;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(800, this.ctx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.masterGain);
+                noise.start();
+            }
+
+            playPowerUp() {
+                if (!this.initialized) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(1320, now + 0.2);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(now + 0.3);
+            }
+
+            playImpact() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+
+            playClick() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+        }
+
+        const audio = new AudioEngine();
+
+        // --- GAME STATE ---
+        const gameState = {
+            started: false,
+            score: 0,
+            health: 100,
+            shotsFired: 0,
+            shotsHit: 0,
+            gameOver: false,
+            keys: {},
+            lastShotTime: 0,
+            enemies: [],
+            bullets: [],
+            explosions: [],
+            powerups: [],
+            activeEffects: {},
+            difficultyMult: 0.5,
+            aiAnalyzing: false,
+            lastAiAnalysisScore: 0,
+            sessionStartTime: 0,
+            selectedDuration: 30,
+            timerRemaining: 30,
+            apiKey: "" 
+        };
+
+        const POWERUP_TYPES = {
+            SHIELD: { color: 0x00ffff, label: 'SHIELD ACTIVE', duration: 8000 },
+            RAPID: { color: 0xffff00, label: 'RAPID FIRE', duration: 10000 },
+            MULTI: { color: 0xff00ff, label: 'MULTI-SHOT', duration: 10000 },
+            REPAIR: { color: 0x00ff00, label: 'SYSTEM REPAIR', duration: 0 }
+        };
+
+        // --- AI DIRECTIVE LOGIC ---
+        async function runAIDirectorUpdate(reason = "standard") {
+            if (gameState.aiAnalyzing || !gameState.started || gameState.gameOver) return;
+            
+            gameState.aiAnalyzing = true;
+            document.getElementById('ai-loading').classList.remove('hidden');
+
+            const accuracy = gameState.shotsFired > 0 ? (gameState.shotsHit / gameState.shotsFired) : 1;
+            const payload = {
+                pilotStats: {
+                    kills: gameState.score / 100,
+                    health: gameState.health,
+                    accuracy: (accuracy * 100).toFixed(1) + "%",
+                    timeLeft: Math.floor(gameState.timerRemaining),
+                    currentIntensity: gameState.difficultyMult,
+                    activeEffects: Object.keys(gameState.activeEffects),
+                    updateReason: reason
+                },
+                prompt: "You are ARIA, Astro Space Game Director. Respond in JSON with fields 'message' and 'multiplier'. Be descriptive about their combat efficiency."
+            };
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${gameState.apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: JSON.stringify(payload) }] }],
+                        generationConfig: { responseMimeType: "application/json" }
+                    })
+                });
+
+                const result = await response.json();
+                const aiData = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text);
+                gameState.difficultyMult = Math.max(0.5, aiData.multiplier || gameState.difficultyMult);
+                document.getElementById('ai-status-text').innerText = aiData.message || "Adjusting swarm density.";
+            } catch (error) {
+                console.error("AI Link Error", error);
+            } finally {
+                gameState.aiAnalyzing = false;
+                gameState.lastAiAnalysisScore = gameState.score;
+                document.getElementById('ai-loading').classList.add('hidden');
+            }
+        }
+
+        // --- THREE.JS ENGINE ---
+        let scene, camera, renderer, player, starField, shieldMesh;
+        const crosshairEl = document.getElementById('crosshair');
+
+        function initThree() {
+            if (renderer) return;
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            
+            scene.add(new THREE.AmbientLight(0x4040ff, 0.4));
+            const pLight = new THREE.PointLight(0x00ffff, 2, 100);
+            pLight.position.set(0, 5, 0);
+            scene.add(pLight);
+
+            const geo = new THREE.BufferGeometry();
+            const verts = [];
+            for (let i = 0; i < 6000; i++) verts.push((Math.random()-0.5)*2000, (Math.random()-0.5)*2000, (Math.random()-0.5)*2000);
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+            starField = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 }));
+            scene.add(starField);
+
+            player = new THREE.Group();
+            const shipMat = new THREE.MeshPhongMaterial({ color: 0x0ea5e9, emissive: 0x075985 });
+            const body = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.8, 4), shipMat);
+            body.rotation.x = Math.PI/2;
+            player.add(body);
+            const w1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.05, 0.6), shipMat);
+            player.add(w1);
+            
+            shieldMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(1.2, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.3 })
+            );
+            shieldMesh.visible = false;
+            player.add(shieldMesh);
+
+            player.position.z = -5;
+            player.visible = false;
+            scene.add(player);
+            camera.position.set(0, 1.2, 2.5);
+        }
+
+        function spawnEnemy() {
+            const enemy = new THREE.Group();
+            const mesh = new THREE.Mesh(
+                new THREE.OctahedronGeometry(0.4 + (Math.random() * 0.3), 0),
+                new THREE.MeshPhongMaterial({ color: 0xf43f5e, wireframe: gameState.difficultyMult > 2.0 })
+            );
+            enemy.add(mesh);
+            enemy.position.set((Math.random()-0.5)*25, (Math.random()-0.5)*18, -120);
+            scene.add(enemy);
+            gameState.enemies.push({
+                mesh: enemy,
+                speed: (0.25 + Math.random() * 0.35) * gameState.difficultyMult,
+                rotSpeed: Math.random() * 0.05
+            });
+        }
+
+        function spawnPowerUp() {
+            const keys = Object.keys(POWERUP_TYPES);
+            const type = keys[Math.floor(Math.random() * keys.length)];
+            const data = POWERUP_TYPES[type];
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 0.8, 0.8),
+                new THREE.MeshPhongMaterial({ color: data.color, emissive: data.color, emissiveIntensity: 0.5 })
+            );
+            mesh.position.set((Math.random()-0.5)*20, (Math.random()-0.5)*15, -120);
+            scene.add(mesh);
+            gameState.powerups.push({ mesh, type, speed: 0.4 });
+        }
+
+        function spawnBullet(pos, vel) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.8), new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+            b.position.copy(pos);
+            scene.add(b);
+            gameState.bullets.push({ mesh: b, vel, hasHit: false });
+            gameState.shotsFired++;
+            audio.playLaser();
+            updateStatsHUD();
+        }
+
+        function updateStatsHUD() {
+            const acc = gameState.shotsFired > 0 ? Math.floor((gameState.shotsHit / gameState.shotsFired) * 100) : 100;
+            document.getElementById('accuracy-val').innerText = acc + '%';
+            document.getElementById('kill-count').innerText = gameState.score / 100;
+        }
+
+        function updateTimerHUD() {
+            const mins = Math.floor(gameState.timerRemaining / 60);
+            const secs = Math.floor(gameState.timerRemaining % 60);
+            document.getElementById('timer-val').innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function update() {
+            if (starField) starField.position.z += (0.5 * gameState.difficultyMult) + 0.3;
+            if (starField && starField.position.z > 500) starField.position.z = 0;
+
+            if (gameState.started && !gameState.gameOver) {
+                gameState.timerRemaining -= 1/60;
+                if (gameState.timerRemaining <= 0) {
+                    gameState.timerRemaining = 0;
+                    endGame("Mission Complete");
+                }
+                updateTimerHUD();
+
+                gameState.difficultyMult += 0.00004; 
+                document.getElementById('intensity-val').innerText = gameState.difficultyMult.toFixed(2) + 'x';
+                
+                const now = Date.now();
+                const effectsDiv = document.getElementById('active-effects');
+                effectsDiv.innerHTML = '';
+                Object.keys(gameState.activeEffects).forEach(k => {
+                    if (now > gameState.activeEffects[k]) {
+                        delete gameState.activeEffects[k];
+                        if (k === 'SHIELD') shieldMesh.visible = false;
+                    } else {
+                        const div = document.createElement('div');
+                        div.className = "glass px-3 py-1 rounded text-[10px] font-orbitron text-sky-300 animate-pulse";
+                        div.innerText = POWERUP_TYPES[k].label;
+                        effectsDiv.appendChild(div);
+                    }
+                });
+
+                // Movement
+                const ms = 0.18;
+                if (gameState.keys['KeyW']) player.position.y += ms;
+                if (gameState.keys['KeyS']) player.position.y -= ms;
+                if (gameState.keys['KeyA']) player.position.x -= ms;
+                if (gameState.keys['KeyD']) player.position.x += ms;
+                player.position.x = Math.max(-12, Math.min(12, player.position.x));
+                player.position.y = Math.max(-8, Math.min(8, player.position.y));
+
+                player.rotation.z = THREE.MathUtils.lerp(player.rotation.z, -player.position.x * 0.08, 0.1);
+                player.rotation.x = THREE.MathUtils.lerp(player.rotation.x, -player.position.y * 0.05, 0.1);
+
+                const vec = new THREE.Vector3().copy(player.position);
+                vec.z -= 6;
+                vec.project(camera);
+                crosshairEl.style.left = `${(vec.x * 0.5 + 0.5) * window.innerWidth}px`;
+                crosshairEl.style.top = `${(vec.y * -0.5 + 0.5) * window.innerHeight}px`;
+
+                // Shooting
+                let cooldown = gameState.activeEffects['RAPID'] ? 60 : 130;
+                if (gameState.keys['Space'] && Date.now() - gameState.lastShotTime > cooldown) {
+                    if (gameState.activeEffects['MULTI']) {
+                        spawnBullet(player.position.clone().add(new THREE.Vector3(-0.5,0,0)), new THREE.Vector3(0,0,-1.5));
+                        spawnBullet(player.position.clone(), new THREE.Vector3(0,0,-1.5));
+                        spawnBullet(player.position.clone().add(new THREE.Vector3(0.5,0,0)), new THREE.Vector3(0,0,-1.5));
+                    } else {
+                        spawnBullet(player.position.clone(), new THREE.Vector3(0,0,-1.5));
+                    }
+                    gameState.lastShotTime = Date.now();
+                }
+
+                gameState.bullets.forEach((b, i) => {
+                    b.mesh.position.add(b.vel);
+                    if (b.mesh.position.z < -130) { scene.remove(b.mesh); gameState.bullets.splice(i, 1); }
+                });
+
+                if (gameState.score - gameState.lastAiAnalysisScore >= 1000) runAIDirectorUpdate();
+
+                // Power-ups
+                if (Math.random() < 0.005) spawnPowerUp();
+                gameState.powerups.forEach((p, i) => {
+                    p.mesh.position.z += p.speed;
+                    if (p.mesh.position.distanceTo(player.position) < 1.5) {
+                        applyPowerUp(p.type);
+                        scene.remove(p.mesh);
+                        gameState.powerups.splice(i, 1);
+                    } else if (p.mesh.position.z > 10) {
+                        scene.remove(p.mesh);
+                        gameState.powerups.splice(i, 1);
+                    }
+                });
+
+                // Enemies
+                if (Math.random() < 0.03 * gameState.difficultyMult) spawnEnemy();
+                gameState.enemies.forEach((e, i) => {
+                    e.mesh.position.z += e.speed;
+                    if (e.mesh.position.distanceTo(player.position) < 1.4) {
+                        if (!gameState.activeEffects['SHIELD']) handleDamage(20);
+                        else audio.playImpact();
+                        destroyEnemy(i);
+                    }
+                    gameState.bullets.forEach((b, bi) => {
+                        if (!b.hasHit && b.mesh.position.distanceTo(e.mesh.position) < 1.5) {
+                            b.hasHit = true;
+                            gameState.shotsHit++;
+                            gameState.score += 100;
+                            updateStatsHUD();
+                            destroyEnemy(i);
+                            scene.remove(b.mesh);
+                            gameState.bullets.splice(bi, 1);
+                        }
+                    });
+                    if (e.mesh.position.z > 10) destroyEnemy(i);
+                });
+
+                gameState.explosions.forEach((exp, i) => {
+                    exp.life -= 0.03;
+                    exp.mesh.scale.multiplyScalar(0.92);
+                    if (exp.life <= 0) { scene.remove(exp.mesh); gameState.explosions.splice(i, 1); }
+                });
+            }
+            renderer.render(scene, camera);
+            requestAnimationFrame(update);
+        }
+
+        function applyPowerUp(type) {
+            audio.playPowerUp();
+            if (type === 'REPAIR') {
+                gameState.health = Math.min(100, gameState.health + 30);
+                document.getElementById('health-bar').style.width = gameState.health + '%';
+                document.getElementById('health-text').innerText = gameState.health + '%';
+            } else {
+                gameState.activeEffects[type] = Date.now() + POWERUP_TYPES[type].duration;
+                if (type === 'SHIELD') shieldMesh.visible = true;
+            }
+            runAIDirectorUpdate("powerup_collected");
+        }
+
+        function destroyEnemy(index) {
+            const e = gameState.enemies[index];
+            if (!e) return;
+            audio.playExplosion();
+            const exp = new THREE.Mesh(new THREE.SphereGeometry(0.8, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff4400, wireframe: true }));
+            exp.position.copy(e.mesh.position);
+            scene.add(exp);
+            gameState.explosions.push({ mesh: exp, life: 1.0 });
+            scene.remove(e.mesh);
+            gameState.enemies.splice(index, 1);
+        }
+
+        function handleDamage(val) {
+            audio.playImpact();
+            gameState.health -= val;
+            document.getElementById('health-bar').style.width = gameState.health + '%';
+            document.getElementById('health-text').innerText = gameState.health + '%';
+            if (gameState.health <= 0) endGame("Neural Disconnect");
+        }
+
+        function selectDuration(seconds) {
+            gameState.selectedDuration = seconds;
+            document.querySelectorAll('.time-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('time-' + seconds).classList.add('active');
+            audio.playClick();
+        }
+
+        function startGame() {
+            audio.init();
+            audio.playClick();
+            
+            gameState.score = 0; 
+            gameState.health = 100;
+            gameState.shotsFired = 0;
+            gameState.shotsHit = 0;
+            gameState.difficultyMult = 0.5;
+            gameState.gameOver = false; 
+            gameState.started = true;
+            gameState.lastAiAnalysisScore = 0;
+            gameState.sessionStartTime = Date.now();
+            gameState.timerRemaining = gameState.selectedDuration;
+            gameState.activeEffects = {};
+            shieldMesh.visible = false;
+
+            if (scene) {
+                [gameState.enemies, gameState.bullets, gameState.powerups, gameState.explosions].forEach(arr => {
+                    arr.forEach(item => scene.remove(item.mesh || item));
+                });
+                gameState.enemies = []; gameState.bullets = []; gameState.powerups = []; gameState.explosions = [];
+            }
+
+            document.getElementById('main-menu').classList.add('hidden');
+            document.getElementById('game-over').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            updateStatsHUD();
+            updateTimerHUD();
+            
+            player.visible = true;
+            player.position.set(0,0,-5);
+            initThree();
+        }
+
+        function goToHome() {
+            audio.playClick();
+            gameState.started = false;
+            player.visible = false;
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-over').classList.add('hidden');
+            document.getElementById('main-menu').classList.remove('hidden');
+        }
+
+        function endGame(title) {
+            gameState.gameOver = true;
+            const titleEl = document.getElementById('game-over-title');
+            titleEl.innerText = title;
+            titleEl.style.color = title === "Mission Complete" ? "#38bdf8" : "#f43f5e";
+            
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-over').classList.remove('hidden');
+            
+            document.getElementById('final-score').innerText = (gameState.score / 100);
+            const acc = gameState.shotsFired > 0 ? Math.floor((gameState.shotsHit / gameState.shotsFired) * 100) : 0;
+            document.getElementById('final-accuracy').innerText = acc + "%";
+        }
+
+        window.addEventListener('keydown', e => gameState.keys[e.code] = true);
+        window.addEventListener('keyup', e => gameState.keys[e.code] = false);
+        window.addEventListener('resize', () => {
+            if (!renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.onload = () => {
+            initThree();
+            update();
+        };
+    </script>
+</body>
+</html>
